@@ -1,40 +1,17 @@
-#include "config.h"
-#include <arpa/inet.h>
-#include <errno.h>
+#include <winsock2.h>
 #include <fcntl.h>
-#include <netdb.h>
-#include <netinet/in.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <sys/types.h>
-#include <unistd.h>
+#include <conio.h>
+#include <sys/stat.h>
 
-#if HAVE_SYS_FILIO_H
-#include <sys/filio.h>
-#endif
-
-#if __STDC__
-#  ifndef NOPROTOS
-#    define PARAMS(args)      args
-#  endif
-#endif
-#ifndef PARAMS
-#  define PARAMS(args)        ()
-#endif
-
-char *base64_encodei PARAMS((char *in));
-void usage PARAMS((void));
-int sock_connect PARAMS((const char *hname, int port));
-int main PARAMS((int argc, char *argv[]));
+char *base64_encode(char *in);
+void usage(void);
+int sock_connect(const char *hname, int port);
+int main(int argc, char *argv[]);
 
 #define BUFSIZE 4096
-/*
-char linefeed[] = "\x0A\x0D\x0A\x0D";
-*/
-char linefeed[] = "\r\n\r\n"; /* it is better and tested with oops & squid */
+
+char linefeed[] = "\r\n\r\n";
 
 /*
 ** base64.c
@@ -44,13 +21,8 @@ char linefeed[] = "\r\n\r\n"; /* it is better and tested with oops & squid */
 const static char base64[64] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 /* the output will be allocated automagically */
-#ifdef ANSI_FUNC
-char *base64_encode (char *in)
-#else
-char * base64_encode (in)
-char *in;
-#endif
-{
+char*
+base64_encode(char *in) {
 	char *src, *end;
 	char *buf, *ret;
 
@@ -121,24 +93,13 @@ char *in;
 	return ret;
 }
 
-#ifdef ANSI_FUNC
-void usage (void)
-#else
-void usage ()
-#endif
-{
-	printf("corkscrew %s (agroman@agroman.net)\n\n", VERSION);
-	printf("usage: corkscrew <proxyhost> <proxyport> <desthost> <destport> [authfile]\n");
+void
+usage(void) {
+	printf("Usage: corkwin <proxyhost> <proxyport> <desthost> <destport> [authfile]\n");
 }
 
-#ifdef ANSI_FUNC
-int sock_connect (const char *hname, int port)
-#else
-int sock_connect (hname, port)
-const char *hname;
-int port;
-#endif
-{
+int
+sock_connect (const char *hname, int port) {
 	int fd;
 	struct sockaddr_in addr;
 	struct hostent *hent;
@@ -161,19 +122,47 @@ int port;
 	return fd;
 }
 
-#ifdef ANSI_FUNC
-int main (int argc, char *argv[])
-#else
-int main (argc, argv)
-int argc;
-char *argv[];
-#endif
+/*
+* connect.c -- Make socket connection using SOCKS4/5 and HTTP tunnel.
+*
+* Copyright (c) 2000-2006, 2012 Shun-ichi Goto
+* Copyright (c) 2002, J. Grant (English Corrections)
+*/
+
+int
+stdindatalen (void)
 {
-#ifdef ANSI_FUNC
+    DWORD len = 0;
+    struct stat st;
+    fstat( 0, &st );
+    if ( st.st_mode & _S_IFIFO ) {
+        /* in case of PIPE */
+        if ( !PeekNamedPipe( GetStdHandle(STD_INPUT_HANDLE),
+                             NULL, 0, NULL, &len, NULL) ) {
+            if ( GetLastError() == ERROR_BROKEN_PIPE ) {
+                /* PIPE source is closed */
+                /* read() will detects EOF */
+                len = 1;
+            } else {
+                fprintf(stderr, "PeekNamedPipe() failed, errno=%d\n",
+                      GetLastError());
+            }
+        }
+    } else if ( st.st_mode & _S_IFREG ) {
+        /* in case of regular file (redirected) */
+        len = 1;                        /* always data ready */
+    } else if ( _kbhit() ) {
+        /* in case of console */
+        len = 1;
+    }
+    return len;
+}
+
+int
+main (int argc, char *argv[]) {
+	WSADATA wsadata;
+    WSAStartup( 0x101, &wsadata);
 	char uri[BUFSIZE] = "", buffer[BUFSIZE] = "", version[BUFSIZE] = "", descr[BUFSIZE] = "";
-#else
-	char uri[BUFSIZE], buffer[BUFSIZE], version[BUFSIZE], descr[BUFSIZE];
-#endif
 	char *host = NULL, *desthost = NULL, *destport = NULL;
 	char *up = NULL, line[4096];
 	int port, sent, setup, code, csock;
@@ -233,26 +222,35 @@ char *argv[];
 		exit(-1);
 	}
 
+	setmode(0, O_BINARY);
+	setmode(1, O_BINARY);
+
 	sent = 0;
 	setup = 0;
 	for(;;) {
 		FD_ZERO(&sfd);
 		FD_ZERO(&rfd);
-		if ((setup == 0) && (sent == 0)) {
-			FD_SET(csock, &sfd);
-		}
 		FD_SET(csock, &rfd);
-		FD_SET(0, &rfd);
+		if ((setup == 0) && (sent == 0)) {
+			FD_SET((SOCKET)csock, &sfd);
+		}
 
-		tv.tv_sec = 5;
-		tv.tv_usec = 0;
+		tv.tv_sec = 0;
+		tv.tv_usec = 10*1000;;
 
-		if(select(csock+1,&rfd,&sfd,NULL,&tv) == -1) break;
+		if(select(csock+1,&rfd,&sfd,NULL,&tv) == -1) {
+			fprintf(stderr, "Test %d\n", WSAGetLastError());
+			break;
+		};
+
+		if (0 < stdindatalen()) {
+            FD_SET (0, &rfd);          /* fake */
+        }
 
 		/* there's probably a better way to do this */
 		if (setup == 0) {
 			if (FD_ISSET(csock, &rfd)) {
-				len = read(csock, buffer, sizeof(buffer));
+				len = recv(csock, buffer, (int) sizeof(buffer), 0);
 				if (len<=0)
 					break;
 				else {
@@ -268,8 +266,9 @@ char *argv[];
 					}
 				}
 			}
+
 			if (FD_ISSET(csock, &sfd) && (sent == 0)) {
-				len = write(csock, uri, strlen(uri));
+				len = send(csock, uri, (int) strlen(uri), 0);
 				if (len<=0)
 					break;
 				else
@@ -277,19 +276,20 @@ char *argv[];
 			}
 		} else {
 			if (FD_ISSET(csock, &rfd)) {
-				len = read(csock, buffer, sizeof(buffer));
+				len = recv(csock, buffer, (int) sizeof(buffer), 0);
 				if (len<=0) break;
-				len = write(1, buffer, len);
+				len = write(1, buffer, (int) len);
 				if (len<=0) break;
 			}
 
 			if (FD_ISSET(0, &rfd)) {
-				len = read(0, buffer, sizeof(buffer));
+				len = read(0, buffer, (int) sizeof(buffer));
 				if (len<=0) break;
-				len = write(csock, buffer, len);
+				len = send(csock, buffer, (int) len, 0);
 				if (len<=0) break;
 			}
 		}
 	}
+	WSACleanup();
 	exit(0);
 }
