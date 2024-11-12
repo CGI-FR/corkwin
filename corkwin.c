@@ -268,37 +268,36 @@ int __cdecl main(int argc, char **argv) {
   else
     printf("recv failed with error: %d\n", WSAGetLastError());
 
-  setmode(0, O_BINARY);
-  setmode(1, O_BINARY);
+  _setmode(_fileno(stdin), O_BINARY);
+  _setmode(_fileno(stdout), O_BINARY);
 
   while (1) {
-    FD_ZERO(&sfd);
     FD_ZERO(&rfd);
     FD_SET(ConnectSocket, &rfd);
 
     tv.tv_sec = 0;
     tv.tv_usec = 10 * 1000;
 
-    if (select(ConnectSocket + 1, &rfd, &sfd, NULL, &tv) == -1) {
-      fprintf(stderr, "Test %d\n", WSAGetLastError());
+    if (select(ConnectSocket + 1, &rfd, NULL, NULL, &tv) == -1) {
+      fprintf(stderr, "select failed with error %d\n", WSAGetLastError());
       break;
     };
 
     if (0 < stdindatalen()) {
-      FD_SET(0, &rfd); /* fake */
+      FD_SET(_fileno(stdin), &rfd); /* fake */
     }
 
     if (FD_ISSET(ConnectSocket, &rfd)) {
       len = recv(ConnectSocket, buffer, (int)sizeof(buffer), 0);
       if (len <= 0)
         break;
-      len = write(1, buffer, (int)len);
+      len = write(_fileno(stdout), buffer, (int)len);
       if (len <= 0)
         break;
     }
 
-    if (FD_ISSET(0, &rfd)) {
-      len = read(0, buffer, (int)sizeof(buffer));
+    if (FD_ISSET(_fileno(stdin), &rfd)) {
+      len = read(_fileno(stdin), buffer, (int)sizeof(buffer));
       if (len <= 0)
         break;
       len = send(ConnectSocket, buffer, (int)len, 0);
