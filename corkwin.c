@@ -9,8 +9,7 @@
 
 char *base64_encode(char *in);
 void usage(void);
-int sock_connect(const char *hname, int port);
-int main(int argc, char *argv[]);
+int __cdecl main(int argc, char **argv);
 
 #define BUFSIZE 4096
 
@@ -243,18 +242,39 @@ int __cdecl main(int argc, char **argv) {
   }
   strncat(uri, linefeed, sizeof(uri) - strlen(uri) - 1);
 
+  iResult = send(ConnectSocket, uri, (int)strlen(uri), 0);
+  if (iResult == SOCKET_ERROR) {
+    printf("send failed with error: %d\n", WSAGetLastError());
+    closesocket(ConnectSocket);
+    WSACleanup();
+    return 1;
+  }
+
+  iResult = recv(ConnectSocket, buffer, sizeof(buffer), 0);
+  if (iResult > 0) {
+    memset(descr, 0, sizeof(descr));
+    sscanf(buffer, "%s%d%[^\n]", version, &code, descr);
+    if ((strncmp(version, "HTTP/", 5) == 0) && (code >= 200) && (code < 300))
+      setup = 1;
+    else {
+      if ((strncmp(version, "HTTP/", 5) == 0) && (code >= 407)) {
+      }
+      fprintf(stderr, "Proxy could not open connection to %s: %s\n", desthost,
+              descr);
+      exit(-1);
+    }
+  } else if (iResult == 0)
+    printf("Connection closed\n");
+  else
+    printf("recv failed with error: %d\n", WSAGetLastError());
+
   setmode(0, O_BINARY);
   setmode(1, O_BINARY);
 
-  sent = 0;
-  setup = 0;
   while (1) {
     FD_ZERO(&sfd);
     FD_ZERO(&rfd);
     FD_SET(ConnectSocket, &rfd);
-    if ((setup == 0) && (sent == 0)) {
-      FD_SET((SOCKET)ConnectSocket, &sfd);
-    }
 
     tv.tv_sec = 0;
     tv.tv_usec = 10 * 1000;
@@ -268,55 +288,28 @@ int __cdecl main(int argc, char **argv) {
       FD_SET(0, &rfd); /* fake */
     }
 
-    /* there's probably a better way to do this */
-    if (setup == 0) {
-      if (FD_ISSET(ConnectSocket, &rfd)) {
-        len = recv(ConnectSocket, buffer, (int)sizeof(buffer), 0);
-        if (len <= 0)
-          break;
-        else {
-          memset(descr, 0, sizeof(descr));
-          sscanf(buffer, "%s%d%[^\n]", version, &code, descr);
-          if ((strncmp(version, "HTTP/", 5) == 0) && (code >= 200) &&
-              (code < 300))
-            setup = 1;
-          else {
-            if ((strncmp(version, "HTTP/", 5) == 0) && (code >= 407)) {
-            }
-            fprintf(stderr, "Proxy could not open connection to %s: %s\n",
-                    desthost, descr);
-            exit(-1);
-          }
-        }
-      }
+    if (FD_ISSET(ConnectSocket, &rfd)) {
+      len = recv(ConnectSocket, buffer, (int)sizeof(buffer), 0);
+      if (len <= 0)
+        break;
+      len = write(1, buffer, (int)len);
+      if (len <= 0)
+        break;
+    }
 
-      if (FD_ISSET(ConnectSocket, &sfd) && (sent == 0)) {
-        len = send(ConnectSocket, uri, (int)strlen(uri), 0);
-        if (len <= 0)
-          break;
-        else
-          sent = 1;
-      }
-    } else {
-      if (FD_ISSET(ConnectSocket, &rfd)) {
-        len = recv(ConnectSocket, buffer, (int)sizeof(buffer), 0);
-        if (len <= 0)
-          break;
-        len = write(1, buffer, (int)len);
-        if (len <= 0)
-          break;
-      }
-
-      if (FD_ISSET(0, &rfd)) {
-        len = read(0, buffer, (int)sizeof(buffer));
-        if (len <= 0)
-          break;
-        len = send(ConnectSocket, buffer, (int)len, 0);
-        if (len <= 0)
-          break;
-      }
+    if (FD_ISSET(0, &rfd)) {
+      len = read(0, buffer, (int)sizeof(buffer));
+      if (len <= 0)
+        break;
+      len = send(ConnectSocket, buffer, (int)len, 0);
+      if (len <= 0)
+        break;
     }
   }
+
+  // cleanup
+  closesocket(ConnectSocket);
   WSACleanup();
+
   return 0;
 }
