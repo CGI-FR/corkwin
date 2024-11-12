@@ -3,6 +3,9 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <winsock2.h>
+#include <ws2tcpip.h>
+
+#pragma comment(lib, "Ws2_32.lib")
 
 char *base64_encode(char *in);
 void usage(void);
@@ -97,29 +100,6 @@ void usage(void) {
          "[authfile]\n");
 }
 
-int sock_connect(const char *hname, int port) {
-  int fd;
-  struct sockaddr_in addr;
-  struct hostent *hent;
-
-  fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (fd == -1)
-    return -1;
-
-  hent = gethostbyname(hname);
-  if (hent == NULL)
-    addr.sin_addr.s_addr = inet_addr(hname);
-  else
-    memcpy(&addr.sin_addr, hent->h_addr, hent->h_length);
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(port);
-
-  if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)))
-    return -1;
-
-  return fd;
-}
-
 /*
  * connect.c -- Make socket connection using SOCKS4/5 and HTTP tunnel.
  *
@@ -153,32 +133,34 @@ int stdindatalen(void) {
   return len;
 }
 
-int main(int argc, char *argv[]) {
-  WSADATA wsadata;
-  WSAStartup(0x101, &wsadata);
+int __cdecl main(int argc, char **argv) {
+  WSADATA wsaData;
+  int iResult;
+  SOCKET ConnectSocket = INVALID_SOCKET;
+  struct addrinfo *result = NULL, *ptr = NULL, hints;
   char uri[BUFSIZE] = "", buffer[BUFSIZE] = "", version[BUFSIZE] = "",
        descr[BUFSIZE] = "";
-  char *host = NULL, *desthost = NULL, *destport = NULL;
+  char *host = NULL, *port = NULL, *desthost = NULL, *destport = NULL;
   char *up = NULL, line[4096];
-  int port, sent, setup, code, csock;
+  int sent, setup, code;
   fd_set rfd, sfd;
   struct timeval tv;
   ssize_t len;
   FILE *fp;
 
-  port = 80;
+  port = "80";
 
   if (argc == 5 || argc == 6) {
     if (argc == 5) {
       host = argv[1];
-      port = atoi(argv[2]);
+      port = argv[2];
       desthost = argv[3];
       destport = argv[4];
       up = getenv("CORKSCREW_AUTH");
     }
     if (argc == 6) {
       host = argv[1];
-      port = atoi(argv[2]);
+      port = argv[2];
       desthost = argv[3];
       destport = argv[4];
       fp = fopen(argv[5], "r");
@@ -200,6 +182,55 @@ int main(int argc, char *argv[]) {
     exit(-1);
   }
 
+  // Initialize Winsock
+  iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
+  if (iResult != 0) {
+    printf("WSAStartup failed: %d\n", iResult);
+    return 1;
+  }
+
+  ZeroMemory(&hints, sizeof(hints));
+  hints.ai_family = AF_INET;
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_protocol = IPPROTO_TCP;
+
+  // Resolve the server address and port
+  iResult = getaddrinfo(host, port, &hints, &result);
+  if (iResult != 0) {
+    printf("getaddrinfo failed: %d\n", iResult);
+    WSACleanup();
+    return 1;
+  }
+
+  // Attempt to connect to an address until one succeeds
+  for (ptr = result; ptr != NULL; ptr = ptr->ai_next) {
+
+    // Create a SOCKET for connecting to server
+    ConnectSocket = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol);
+    if (ConnectSocket == INVALID_SOCKET) {
+      printf("socket failed with error: %ld\n", WSAGetLastError());
+      WSACleanup();
+      return 1;
+    }
+
+    // Connect to server.
+    iResult = connect(ConnectSocket, ptr->ai_addr, (int)ptr->ai_addrlen);
+    if (iResult == SOCKET_ERROR) {
+      closesocket(ConnectSocket);
+      ConnectSocket = INVALID_SOCKET;
+      continue;
+    }
+    break;
+  }
+
+  freeaddrinfo(result);
+
+  if (ConnectSocket == INVALID_SOCKET) {
+    printf("Unable to connect to server!\n");
+    WSACleanup();
+    return 1;
+  }
+
   strncpy(uri, "CONNECT ", sizeof(uri));
   strncat(uri, desthost, sizeof(uri) - strlen(uri) - 1);
   strncat(uri, ":", sizeof(uri) - strlen(uri) - 1);
@@ -212,30 +243,23 @@ int main(int argc, char *argv[]) {
   }
   strncat(uri, linefeed, sizeof(uri) - strlen(uri) - 1);
 
-  csock = sock_connect(host, port);
-  if (csock == -1) {
-    fprintf(stderr, "Couldn't establish connection to proxy: %s\n",
-            strerror(errno));
-    exit(-1);
-  }
-
   setmode(0, O_BINARY);
   setmode(1, O_BINARY);
 
   sent = 0;
   setup = 0;
-  for (;;) {
+  while (1) {
     FD_ZERO(&sfd);
     FD_ZERO(&rfd);
-    FD_SET(csock, &rfd);
+    FD_SET(ConnectSocket, &rfd);
     if ((setup == 0) && (sent == 0)) {
-      FD_SET((SOCKET)csock, &sfd);
+      FD_SET((SOCKET)ConnectSocket, &sfd);
     }
 
     tv.tv_sec = 0;
     tv.tv_usec = 10 * 1000;
 
-    if (select(csock + 1, &rfd, &sfd, NULL, &tv) == -1) {
+    if (select(ConnectSocket + 1, &rfd, &sfd, NULL, &tv) == -1) {
       fprintf(stderr, "Test %d\n", WSAGetLastError());
       break;
     };
@@ -246,8 +270,8 @@ int main(int argc, char *argv[]) {
 
     /* there's probably a better way to do this */
     if (setup == 0) {
-      if (FD_ISSET(csock, &rfd)) {
-        len = recv(csock, buffer, (int)sizeof(buffer), 0);
+      if (FD_ISSET(ConnectSocket, &rfd)) {
+        len = recv(ConnectSocket, buffer, (int)sizeof(buffer), 0);
         if (len <= 0)
           break;
         else {
@@ -266,16 +290,16 @@ int main(int argc, char *argv[]) {
         }
       }
 
-      if (FD_ISSET(csock, &sfd) && (sent == 0)) {
-        len = send(csock, uri, (int)strlen(uri), 0);
+      if (FD_ISSET(ConnectSocket, &sfd) && (sent == 0)) {
+        len = send(ConnectSocket, uri, (int)strlen(uri), 0);
         if (len <= 0)
           break;
         else
           sent = 1;
       }
     } else {
-      if (FD_ISSET(csock, &rfd)) {
-        len = recv(csock, buffer, (int)sizeof(buffer), 0);
+      if (FD_ISSET(ConnectSocket, &rfd)) {
+        len = recv(ConnectSocket, buffer, (int)sizeof(buffer), 0);
         if (len <= 0)
           break;
         len = write(1, buffer, (int)len);
@@ -287,12 +311,12 @@ int main(int argc, char *argv[]) {
         len = read(0, buffer, (int)sizeof(buffer));
         if (len <= 0)
           break;
-        len = send(csock, buffer, (int)len, 0);
+        len = send(ConnectSocket, buffer, (int)len, 0);
         if (len <= 0)
           break;
       }
     }
   }
   WSACleanup();
-  exit(0);
+  return 0;
 }
