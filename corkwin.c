@@ -95,8 +95,7 @@ char *base64_encode(char *in) {
 }
 
 void usage(void) {
-  printf("Usage: corkwin <proxyhost> <proxyport> <desthost> <destport> "
-         "[authfile]\n");
+  printf("Usage: corkwin <proxyhost> <proxyport> <desthost> <destport>\n");
 }
 
 /*
@@ -149,36 +148,14 @@ int __cdecl main(int argc, char **argv) {
 
   port = "80";
 
-  if (argc == 5 || argc == 6) {
-    if (argc == 5) {
-      host = argv[1];
-      port = argv[2];
-      desthost = argv[3];
-      destport = argv[4];
-      up = getenv("CORKSCREW_AUTH");
-    }
-    if (argc == 6) {
-      host = argv[1];
-      port = argv[2];
-      desthost = argv[3];
-      destport = argv[4];
-      fp = fopen(argv[5], "r");
-      if (fp == NULL) {
-        fprintf(stderr, "Error opening %s: %s\n", argv[5], strerror(errno));
-        exit(-1);
-      } else {
-        if (!fscanf(fp, "%4095s", line)) {
-          fprintf(stderr, "Error reading auth file's content\n");
-          exit(-1);
-        }
-
-        up = line;
-        fclose(fp);
-      }
-    }
+  if (argc == 5) {
+    host = argv[1];
+    port = argv[2];
+    desthost = argv[3];
+    destport = argv[4];
   } else {
     usage();
-    exit(-1);
+    return -1;
   }
 
   // Initialize Winsock
@@ -235,11 +212,6 @@ int __cdecl main(int argc, char **argv) {
   strncat(uri, ":", sizeof(uri) - strlen(uri) - 1);
   strncat(uri, destport, sizeof(uri) - strlen(uri) - 1);
   strncat(uri, " HTTP/1.0", sizeof(uri) - strlen(uri) - 1);
-  if (up != NULL) {
-    strncat(uri, "\nProxy-Authorization: Basic ",
-            sizeof(uri) - strlen(uri) - 1);
-    strncat(uri, base64_encode(up), sizeof(uri) - strlen(uri) - 1);
-  }
   strncat(uri, linefeed, sizeof(uri) - strlen(uri) - 1);
 
   iResult = send(ConnectSocket, uri, (int)strlen(uri), 0);
