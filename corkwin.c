@@ -161,7 +161,7 @@ int __cdecl main(int argc, char **argv) {
   // Initialize Winsock
   iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
   if (iResult != 0) {
-    printf("WSAStartup failed: %d\n", iResult);
+    fprintf(stderr, "WSAStartup failed: %d\n", iResult);
     return 1;
   }
 
@@ -173,7 +173,7 @@ int __cdecl main(int argc, char **argv) {
   // Resolve the server address and port
   iResult = getaddrinfo(host, port, &hints, &result);
   if (iResult != 0) {
-    printf("getaddrinfo failed: %d\n", iResult);
+    fprintf(stderr, "getaddrinfo failed: %d\n", iResult);
     WSACleanup();
     return 1;
   }
@@ -184,7 +184,7 @@ int __cdecl main(int argc, char **argv) {
     // Create a SOCKET for connecting to server
     ConnectSocket = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol);
     if (ConnectSocket == INVALID_SOCKET) {
-      printf("socket failed with error: %ld\n", WSAGetLastError());
+      fprintf(stderr, "socket failed with error: %ld\n", WSAGetLastError());
       WSACleanup();
       return 1;
     }
@@ -202,7 +202,7 @@ int __cdecl main(int argc, char **argv) {
   freeaddrinfo(result);
 
   if (ConnectSocket == INVALID_SOCKET) {
-    printf("Unable to connect to server!\n");
+    fprintf(stderr, "Unable to connect to server!\n");
     WSACleanup();
     return 1;
   }
@@ -216,7 +216,7 @@ int __cdecl main(int argc, char **argv) {
 
   iResult = send(ConnectSocket, uri, (int)strlen(uri), 0);
   if (iResult == SOCKET_ERROR) {
-    printf("send failed with error: %d\n", WSAGetLastError());
+    fprintf(stderr, "send failed with error: %d\n", WSAGetLastError());
     closesocket(ConnectSocket);
     WSACleanup();
     return 1;
@@ -236,9 +236,9 @@ int __cdecl main(int argc, char **argv) {
       exit(-1);
     }
   } else if (iResult == 0)
-    printf("Connection closed\n");
+    fprintf(stderr, "Connection closed\n");
   else
-    printf("recv failed with error: %d\n", WSAGetLastError());
+    fprintf(stderr, "recv failed with error: %d\n", WSAGetLastError());
 
   _setmode(_fileno(stdin), O_BINARY);
   _setmode(_fileno(stdout), O_BINARY);
