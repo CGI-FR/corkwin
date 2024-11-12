@@ -139,14 +139,11 @@ int __cdecl main(int argc, char **argv) {
   char uri[BUFSIZE] = "", buffer[BUFSIZE] = "", version[BUFSIZE] = "",
        descr[BUFSIZE] = "";
   char *host = NULL, *port = NULL, *desthost = NULL, *destport = NULL;
-  char *up = NULL, line[4096];
-  int sent, setup, code;
-  fd_set rfd, sfd;
+  int code;
+  fd_set rfd;
   struct timeval tv;
   ssize_t len;
   FILE *fp;
-
-  port = "80";
 
   if (argc == 5) {
     host = argv[1];
@@ -211,7 +208,7 @@ int __cdecl main(int argc, char **argv) {
   strncat(uri, desthost, sizeof(uri) - strlen(uri) - 1);
   strncat(uri, ":", sizeof(uri) - strlen(uri) - 1);
   strncat(uri, destport, sizeof(uri) - strlen(uri) - 1);
-  strncat(uri, " HTTP/1.0", sizeof(uri) - strlen(uri) - 1);
+  strncat(uri, " HTTP/1.1", sizeof(uri) - strlen(uri) - 1);
   strncat(uri, linefeed, sizeof(uri) - strlen(uri) - 1);
 
   iResult = send(ConnectSocket, uri, (int)strlen(uri), 0);
@@ -226,14 +223,11 @@ int __cdecl main(int argc, char **argv) {
   if (iResult > 0) {
     memset(descr, 0, sizeof(descr));
     sscanf(buffer, "%s%d%[^\n]", version, &code, descr);
-    if ((strncmp(version, "HTTP/", 5) == 0) && (code >= 200) && (code < 300))
-      setup = 1;
-    else {
-      if ((strncmp(version, "HTTP/", 5) == 0) && (code >= 407)) {
-      }
+    if ((strncmp(version, "HTTP/", 5) != 0) ||
+        !((code >= 200) && (code < 300))) {
       fprintf(stderr, "Proxy could not open connection to %s: %s\n", desthost,
               descr);
-      exit(-1);
+      return -1;
     }
   } else if (iResult == 0)
     fprintf(stderr, "Connection closed\n");
